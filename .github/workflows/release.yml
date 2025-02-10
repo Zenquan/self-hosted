@@ -15,18 +15,48 @@ on:
     - cron: "0 18 15 * *"
 jobs:
   release:
+    if: github.repository_owner == 'getsentry'
     runs-on: ubuntu-latest
     name: "Release a new version"
     steps:
-      - uses: actions/checkout@v2
+      - name: Get auth token
+        id: token
+        uses: actions/create-github-app-token@67e27a7eb7db372a1c61a7f9bdab8699e9ee57f7 # v1.11.3
         with:
-          token: ${{ secrets.GH_RELEASE_PAT }}
+          app-id: ${{ vars.SENTRY_RELEASE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.SENTRY_RELEASE_BOT_PRIVATE_KEY }}
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ steps.token.outputs.token }}
           fetch-depth: 0
       - name: Prepare release
+        id: prepare-release
         uses: getsentry/action-prepare-release@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_RELEASE_PAT }}
+          GITHUB_TOKEN: ${{ steps.token.outputs.token }}
         with:
           version: ${{ github.event.inputs.version }}
           force: ${{ github.event.inputs.force }}
           calver: true
+    outputs:
+      release-version: ${{ env.RELEASE_VERSION }}
+  dogfood-release:
+    if: github.repository_owner == 'getsentry'
+    runs-on: ubuntu-latest
+    name: Create release on self-hosted dogfood instance
+    needs: release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: getsentry/action-release@v1
+        env:
+          SENTRY_ORG: self-hosted
+          SENTRY_PROJECT: installer
+          SENTRY_URL: https://self-hosted.getsentry.net/
+          SENTRY_AUTH_TOKEN: ${{ secrets.SELF_HOSTED_RELEASE_TOKEN }}
+        with:
+          environment: production
+          version: ${{ needs.release.outputs.release-version }}
+          ignore_empty: true
+          ignore_missing: true
